@@ -60,6 +60,7 @@ class Trainer:
         self.env = env
         self.exp_replay = ExperienceReplay(capacity=kwargs.get("capacity", 10000))
         self.verbose = kwargs.get("verbose", True)
+        self.historic={}
 
     def fill_exp_replay(self, max_steps: int = 1000, verbose: bool = True):
         """This function fills an experience replay buffer with experiences from random episodes.
@@ -183,6 +184,7 @@ class Trainer:
         while n_steps < max_steps:
             episode = random.randint(0, len(self.env.historical_data_series) - 1)
             self.env.swap_episode(episode)
+            self.historic[episode]=[]
             while not self.env.done:
                 
                 current_state = self.env.state.copy()
@@ -198,7 +200,7 @@ class Trainer:
                     self.env.state.copy(),
                     distance2horizon,
                 )
-                print(current_state,action)
+                self.historic[episode].append((current_state,action))
 
             n_steps += 1
             if self.verbose:
