@@ -10,44 +10,55 @@ from ._neural_net import QNet
 from ddql_optimal_execution import State, get_device
 
 def inventory_action_transformer(
-    inventory_action_pairs=Union[torch.Tensor, np.ndarray], q0: float = 1000
+    inventory_action_pairs=Union[torch.Tensor, np.ndarray], q0: float = 1000,transformed=True
 ) -> Union[torch.Tensor, np.ndarray]:
     """
-    It takes in a list of inventory-action pairs, and returns a list of inventory-action pairs, where
+
+    If transformed=True:
+    
+    it takes in a list of inventory-action pairs, and returns a list of inventory-action pairs, where
     each inventory-action pair is transformed according to Appendix A.1
 
 
     :param inv_act_pairs: a tensor of shape (batch_size, 2) where the first column is the inventory and
     the second column is the action
+
+    Else:
+
+    it just normalize inventory by dividing by initial inventory 
     """
-
     inventory_action_pairs_transformed = np.copy(inventory_action_pairs) #type: ignore
+    inventory_action_pairs_transformed /= (q0+1)
 
-    inventory_action_pairs_transformed /= q0
-    inventory_action_pairs_transformed[:, 0] -= 1
+    if transformed:
+        
 
-    r = np.sqrt(
-        inventory_action_pairs_transformed[:, 0] ** 2
-        + inventory_action_pairs_transformed[:, 1] ** 2
-    )
-    xi = (
-        -inventory_action_pairs_transformed[:, 1]
-        / inventory_action_pairs_transformed[:, 0]
-    )
-    theta = np.arctan(xi)
-    r_tilda = np.zeros_like(r)
-    r_tilda[theta <= np.pi / 4] = r[theta <= np.pi / 4] * np.sqrt(
-        (xi[theta <= np.pi / 4] ** 2 + 1)
-        * (2 * (np.cos(np.pi / 4 - theta[theta <= np.pi / 4])) ** 2)
-    )
-    r_tilda[theta > np.pi / 4] = r[theta > np.pi / 4] * np.sqrt(
-        (xi[theta > np.pi / 4] ** (-2) + 1)
-        * (2 * (np.cos(theta[theta > np.pi / 4] - np.pi / 4)) ** 2)
-    )
-    tilda_q = -r_tilda * np.cos(theta)
-    tilda_x = r_tilda * np.sin(theta)
-    inventory_action_pairs_transformed[:, 0] = tilda_q
-    inventory_action_pairs_transformed[:, 1] = tilda_x
+        #inventory_action_pairs_transformed /= q0
+        inventory_action_pairs_transformed[:, 0] -= 1
+
+        r = np.sqrt(
+            inventory_action_pairs_transformed[:, 0] ** 2
+            + inventory_action_pairs_transformed[:, 1] ** 2
+        )
+        xi = (
+            -inventory_action_pairs_transformed[:, 1]
+            / inventory_action_pairs_transformed[:, 0]
+        )
+        theta = np.arctan(xi)
+        r_tilda = np.zeros_like(r)
+        r_tilda[theta <= np.pi / 4] = r[theta <= np.pi / 4] * np.sqrt(
+            (xi[theta <= np.pi / 4] ** 2 + 1)
+            * (2 * (np.cos(np.pi / 4 - theta[theta <= np.pi / 4])) ** 2)
+        )
+        r_tilda[theta > np.pi / 4] = r[theta > np.pi / 4] * np.sqrt(
+            (xi[theta > np.pi / 4] ** (-2) + 1)
+            * (2 * (np.cos(theta[theta > np.pi / 4] - np.pi / 4)) ** 2)
+        )
+        tilda_q = -r_tilda * np.cos(theta)
+        tilda_x = r_tilda * np.sin(theta)
+        inventory_action_pairs_transformed[:, 0] = tilda_q
+        inventory_action_pairs_transformed[:, 1] = tilda_x
+
 
     return inventory_action_pairs_transformed
 
@@ -129,6 +140,7 @@ class DDQL(Agent):
         horizon: int = 100,
         gamma: float = 0.99,
         quadratic_penalty_coefficient: float = 0.01,
+        q_a_transformed:bool=True,
         verbose : bool = False
     ) -> None:
         super().__init__(initial_budget, horizon)
@@ -146,6 +158,7 @@ class DDQL(Agent):
         self.state_size = state_size
         self.initial_budget=initial_budget
         self.gamma = gamma
+        self.q_a_transformed=q_a_transformed
 
         if state_dict is not None:
             self.main_net.load_state_dict(state_dict)
@@ -207,7 +220,7 @@ class DDQL(Agent):
         q_values=[]
         for action in range (self.initial_budget):
             state_tr=state.astensor
-            pair_tr=inventory_action_transformer(torch.tensor([state_tr[-1],action]).unsqueeze(0))
+            pair_tr=inventory_action_transformer(torch.tensor([state_tr[-1],action]).unsqueeze(0),self.initial_budget,self.q_a_transformed)
             state_tr[-1]=torch.tensor(pair_tr[0,0])
             action_tr=pair_tr[0,1]
             input=torch.cat((state_tr, torch.tensor([action_tr])), dim=0)
@@ -273,7 +286,7 @@ class DDQL(Agent):
 
                 for action in range (self.initial_budget):
                     state_tr=experience["next_state"].astensor
-                    pair_tr=inventory_action_transformer(torch.tensor([state_tr[-1],action]).unsqueeze(0))
+                    pair_tr=inventory_action_transformer(torch.tensor([state_tr[-1],action]).unsqueeze(0),self.initial_budget,self.q_a_transformed)
                     state_tr[-1]=torch.tensor(pair_tr[0,0])
                     action_tr=pair_tr[0,1]
                     #input=torch.cat((experience["next_state"].astensor, torch.tensor([action])), dim=0)
@@ -289,7 +302,7 @@ class DDQL(Agent):
                 #      * self.target_net(experience["next_state"])[int(best_action)]
                 #  )
                 state_tr=experience["next_state"].astensor
-                pair_tr=inventory_action_transformer(torch.tensor([state_tr[-1],best_action]).unsqueeze(0))
+                pair_tr=inventory_action_transformer(torch.tensor([state_tr[-1],best_action]).unsqueeze(0),self.initial_budget,self.q_a_transformed)
                 state_tr[-1]=torch.tensor(pair_tr[0,0])
                 best_action_tr=pair_tr[0,1]
                 input=torch.cat((state_tr, torch.tensor([best_action_tr])), dim=0)
@@ -329,7 +342,7 @@ class DDQL(Agent):
             state=batch[0]
             action=batch[1]
 
-            pair_tr=inventory_action_transformer(torch.stack([state[:,-1],action],dim=1))
+            pair_tr=inventory_action_transformer(torch.stack([state[:,-1],action],dim=1),self.initial_budget,self.q_a_transformed)
             state[:,-1]=torch.tensor(pair_tr[:,0])
             action=torch.tensor(pair_tr[:,1])
             

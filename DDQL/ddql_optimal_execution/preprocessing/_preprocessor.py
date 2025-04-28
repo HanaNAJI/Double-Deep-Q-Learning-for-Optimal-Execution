@@ -51,7 +51,7 @@ class Preprocessor:
     '''
 
 
-    def __init__(self, n_periods : int, QV :bool = True, normalize_price : bool = True , volume: bool = True) -> None:
+    def __init__(self, n_periods : int, QV :bool = True, normalize_price : bool = True , volume: bool = True,price_eth: bool = True) -> None:
         '''This is a constructor function that initializes the object with the given parameters.
         
         Parameters
@@ -72,6 +72,7 @@ class Preprocessor:
         self.QV = QV
         self.normalize_price = normalize_price
         self.volume = volume
+        self.price_eth=price_eth
 
     
     def __call__(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
@@ -123,6 +124,13 @@ class Preprocessor:
                 raise ValueError("Volume data is not present in the DataFrame.")
         else :
             df = df.drop("volume", axis = 1) 
+
+        if self.price_eth:
+            if "price_eth" not in df.columns:
+                raise ValueError("Price ETH data is not present in the DataFrame.")
+        else :
+            df = df.drop("price_eth", axis = 1) 
+        
 
 
 
